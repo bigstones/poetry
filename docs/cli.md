@@ -303,6 +303,7 @@ You can do this using the `add` command.
 * `--dry-run` : Outputs the operations but will not execute anything (implicitly enables --verbose).
 * `--no-dev` : Do not update the development dependencies. (**Deprecated**, use `--only main` or `--without dev` instead)
 * `--lock` : Do not perform install (only update the lockfile).
+* `--sync`: Synchronize the environment with the locked packages and the specified groups.
 
 {{% note %}}
 When `--only` is specified, `--with` and `--without` options are ignored.
@@ -318,6 +319,14 @@ poetry will choose a suitable one based on the available package versions.
 ```bash
 poetry add requests pendulum
 ```
+
+{{% note %}}
+A package is looked up, by default, only from the [Default Package Source]({{< relref "repositories/#default-package-source" >}}).
+You can modify the default source (PyPI); or add and use [Supplemental Package Sources]({{< relref "repositories/#supplemental-package-sources" >}})
+or [Explicit Package Sources]({{< relref "repositories/#explicit-package-sources" >}}).
+
+For more information, refer to the [Package Sources]({{< relref "repositories/#package-sources" >}}) documentation.
+{{% /note %}}
 
 You can also specify a constraint when adding a package:
 
@@ -412,6 +421,11 @@ my-package = {path = "../my/path", develop = true}
 {{% note %}}
 Before poetry 1.1 path dependencies were installed in editable mode by default. You should always set the `develop` attribute explicitly,
 to make sure the behavior is the same for all poetry versions.
+{{% /note %}}
+
+{{% note %}}
+The `develop` attribute is a Poetry-specific feature, so it is not included in the package distribution metadata.
+In other words, it is only considered when using Poetry to install the project.
 {{% /note %}}
 
 If the package(s) you want to install provide extras, you can specify them
@@ -534,6 +548,7 @@ Note that, at the moment, only pure python wheels are supported.
 ### Options
 
 * `--format (-f)`: Limit the format to either `wheel` or `sdist`.
+* `--output (-o)`: Set output directory for build artifacts. Default is `dist`.
 
 ## publish
 
@@ -559,6 +574,7 @@ Should match a repository name set by the [`config`](#config) command.
 * `--password (-p)`: The password to access the repository.
 * `--cert`: Certificate authority to access the repository.
 * `--client-cert`: Client certificate to access the repository.
+* `--dist-dir`: Dist directory where built artifact are stored. Default is `dist`.
 * `--build`: Build the package before publishing.
 * `--dry-run`: Perform all actions except upload the package.
 * `--skip-existing`: Ignore errors from files already existing in the repository.

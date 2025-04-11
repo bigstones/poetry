@@ -95,12 +95,14 @@ def check_solver_result(
     for op in ops:
         if op.job_type == "update":
             assert isinstance(op, Update)
-            result.append({
-                "job": "update",
-                "from": op.initial_package,
-                "to": op.target_package,
-                "skipped": op.skipped,
-            })
+            result.append(
+                {
+                    "job": "update",
+                    "from": op.initial_package,
+                    "to": op.target_package,
+                    "skipped": op.skipped,
+                }
+            )
         else:
             job = "install"
             if op.job_type == "uninstall":
@@ -2958,16 +2960,18 @@ def test_solver_can_solve_with_legacy_repository_using_proper_python_compatible_
 
     check_solver_result(
         transaction,
-        [{
-            "job": "install",
-            "package": Package(
-                "isort",
-                "4.3.4",
-                source_type="legacy",
-                source_url=repo.url,
-                source_reference=repo.name,
-            ),
-        }],
+        [
+            {
+                "job": "install",
+                "package": Package(
+                    "isort",
+                    "4.3.4",
+                    source_type="legacy",
+                    source_url=repo.url,
+                    source_reference=repo.name,
+                ),
+            }
+        ],
     )
 
 
@@ -3050,16 +3054,18 @@ def test_solver_chooses_from_correct_repository_if_forced(
 
     ops = check_solver_result(
         transaction,
-        [{
-            "job": "install",
-            "package": Package(
-                "tomlkit",
-                "0.5.2",
-                source_type="legacy",
-                source_url=repo.url,
-                source_reference=repo.name,
-            ),
-        }],
+        [
+            {
+                "job": "install",
+                "package": Package(
+                    "tomlkit",
+                    "0.5.2",
+                    source_type="legacy",
+                    source_url=repo.url,
+                    source_reference=repo.name,
+                ),
+            }
+        ],
     )
 
     assert ops[0].package.source_url == "http://legacy.foo.bar"
@@ -3415,6 +3421,104 @@ def test_direct_dependency_with_extras_from_explicit_and_transitive_dependency2(
             {"job": "install", "package": get_package("other", "2.0")},
         ],
     )
+
+
+@pytest.mark.parametrize("locked", [False, True])
+def test_multiple_constraints_explicit_source_transitive_locked_use_latest(
+    package: ProjectPackage,
+    repo: Repository,
+    pool: RepositoryPool,
+    io: NullIO,
+    locked: bool,
+) -> None:
+    """
+    The root package depends on
+     * lib[extra] == 1.0; sys_platform != "linux" with source=explicit1
+     * lib[extra] == 2.0; sys_platform == "linux" with source=explicit2
+     * other >= 1.0
+    "other" depends on "lib" (without an extra and of course without an explicit source
+    because explicit sources can only be defined in the root package).
+
+    If only "other" is in use_latest (equivalent to "poetry update other"),
+    the transitive dependency of "other" on "lib" is resolved before
+    the direct dependency on "lib[extra]" (if packages have been locked before).
+    We still have to make sure that the locked package is looked up in the explicit
+    source although the DependencyCache is not used for locked packages,
+    so we can't rely on it to propagate the correct source.
+    """
+    package.add_dependency(
+        Factory.create_dependency(
+            "lib",
+            {
+                "version": "1.0",
+                "extras": ["extra"],
+                "source": "explicit1",
+                "markers": "sys_platform != 'linux'",
+            },
+        )
+    )
+    package.add_dependency(
+        Factory.create_dependency(
+            "lib",
+            {
+                "version": "2.0",
+                "extras": ["extra"],
+                "source": "explicit2",
+                "markers": "sys_platform == 'linux'",
+            },
+        )
+    )
+    package.add_dependency(Factory.create_dependency("other", {"version": ">=1.0"}))
+
+    explicit_repo1 = Repository("explicit1")
+    pool.add_repository(explicit_repo1, priority=Priority.EXPLICIT)
+    explicit_repo2 = Repository("explicit2")
+    pool.add_repository(explicit_repo2, priority=Priority.EXPLICIT)
+
+    dep_extra = get_dependency("extra", ">=1.0")
+    dep_extra_opt = Factory.create_dependency(
+        "extra", {"version": ">=1.0", "optional": True}
+    )
+    package_lib1 = Package(
+        "lib", "1.0", source_type="legacy", source_reference="explicit1"
+    )
+    package_lib1.extras = {canonicalize_name("extra"): [dep_extra]}
+    package_lib1.add_dependency(dep_extra_opt)
+    explicit_repo1.add_package(package_lib1)
+    package_lib2 = Package(
+        "lib", "2.0", source_type="legacy", source_reference="explicit2"
+    )
+    package_lib2.extras = {canonicalize_name("extra"): [dep_extra]}
+    package_lib2.add_dependency(dep_extra_opt)
+    explicit_repo2.add_package(package_lib2)
+
+    package_extra = Package("extra", "1.0")
+    repo.add_package(package_extra)
+    package_other = Package("other", "1.5")
+    package_other.add_dependency(Factory.create_dependency("lib", ">=1.0"))
+    repo.add_package(package_other)
+
+    if locked:
+        locked_packages = [package_extra, package_lib1, package_lib2, package_other]
+        use_latest = [canonicalize_name("other")]
+    else:
+        locked_packages = []
+        use_latest = None
+    solver = Solver(package, pool, [], locked_packages, io)
+
+    transaction = solver.solve(use_latest=use_latest)
+
+    ops = check_solver_result(
+        transaction,
+        [
+            {"job": "install", "package": package_extra},
+            {"job": "install", "package": package_lib1},
+            {"job": "install", "package": package_lib2},
+            {"job": "install", "package": package_other},
+        ],
+    )
+    assert ops[1].package.source_reference == "explicit1"
+    assert ops[2].package.source_reference == "explicit2"
 
 
 def test_solver_discards_packages_with_empty_markers(
@@ -4511,10 +4615,12 @@ def test_solver_resolves_duplicate_dependency_in_extra(
 
     check_solver_result(
         transaction,
-        ([
-            {"job": "install", "package": package_b1 if with_extra else package_b2},
-            {"job": "install", "package": package_a},
-        ]),
+        (
+            [
+                {"job": "install", "package": package_b1 if with_extra else package_b2},
+                {"job": "install", "package": package_a},
+            ]
+        ),
     )
 
 
@@ -4549,9 +4655,11 @@ def test_solver_resolves_duplicate_dependencies_with_restricted_extras(
 
     check_solver_result(
         transaction,
-        ([
-            {"job": "install", "package": package_b1},
-            {"job": "install", "package": package_b2},
-            {"job": "install", "package": package_a},
-        ]),
+        (
+            [
+                {"job": "install", "package": package_b1},
+                {"job": "install", "package": package_b2},
+                {"job": "install", "package": package_a},
+            ]
+        ),
     )
